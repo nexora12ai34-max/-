@@ -1,0 +1,52 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: xmessenger
+      POSTGRES_USER: xmessenger
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xmessenger -d xmessenger"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://xmessenger:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/xmessenger
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      AI_PROVIDER: ${AI_PROVIDER:-local-fallback}
+      REDIS_URL: redis://redis:6379/0
+      REALTIME_CHANNEL: ${REALTIME_CHANNEL:-hamraz:realtime:v1}
+      CONNECTION_TIMEOUT_SECONDS: ${CONNECTION_TIMEOUT_SECONDS:-75}
+      HEARTBEAT_SECONDS: ${HEARTBEAT_SECONDS:-25}
+    ports: ["8000:8000"]
+    volumes: ["./backend/uploads:/app/uploads"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+  web:
+    image: node:22-alpine
+    working_dir: /web
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    environment:
+      VITE_API_URL: http://localhost:8000
+    ports: ["5173:5173"]
+    volumes: ["./frontend:/web"]
+    depends_on: [backend]
+volumes:
+  pgdata:

@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+node_modules/
+dist/
+.env
+.pytest_cache/
+.vscode/
+.venv/
+build/
+release/
+.hamraz-oneclick/

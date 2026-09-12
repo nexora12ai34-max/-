@@ -1,0 +1,109 @@
+services:
+  edge:
+    image: caddy:2-alpine
+    environment:
+      HAMRAZ_DOMAIN: ${HAMRAZ_DOMAIN:?Set HAMRAZ_DOMAIN}
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: xmessenger
+      POSTGRES_USER: xmessenger
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xmessenger -d xmessenger"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+
+  minio:
+    image: minio/minio:${MINIO_IMAGE_TAG:?Set MINIO_IMAGE_TAG}
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
+    volumes:
+      - miniodata:/data
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      HAMRAZ_DATA_DIR: /var/lib/hamraz
+      HAMRAZ_MEDIA_DIR: /var/lib/hamraz/uploads
+      DATABASE_URL: postgresql+psycopg://xmessenger:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/xmessenger
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
+      REDIS_URL: redis://redis:6379/0
+      CORS_ORIGINS: https://${HAMRAZ_DOMAIN:?Set HAMRAZ_DOMAIN}
+      PUBLIC_BASE_URL: https://${HAMRAZ_DOMAIN:?Set HAMRAZ_DOMAIN}
+      CDN_BASE_URL: https://${HAMRAZ_DOMAIN:?Set HAMRAZ_DOMAIN}
+      CDN_SIGNING_SECRET: ${CDN_SIGNING_SECRET:?Set CDN_SIGNING_SECRET}
+      HAMRAZ_SEARCH_MODE: ${HAMRAZ_SEARCH_MODE:-embedded}
+      OPENSEARCH_URL: ${OPENSEARCH_URL:-}
+      APP_ENV: production
+      ALLOW_WS_TOKEN: "false"
+      COMMERCE_WEBHOOK_SECRET: ${COMMERCE_WEBHOOK_SECRET:?Set COMMERCE_WEBHOOK_SECRET}
+      INFRA_HEARTBEAT_SECRET: ${INFRA_HEARTBEAT_SECRET:?Set INFRA_HEARTBEAT_SECRET}
+      ADMIN_AUDIT_SECRET: ${ADMIN_AUDIT_SECRET:?Set ADMIN_AUDIT_SECRET}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    volumes:
+      - hamrazdata:/var/lib/hamraz
+
+  frontend:
+    image: nginx:alpine
+    restart: unless-stopped
+    volumes:
+      - ./frontend/dist:/usr/share/nginx/html:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    expose:
+      - "80"
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:
+  hamrazdata:
+  caddy_data:
+  caddy_config:

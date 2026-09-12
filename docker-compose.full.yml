@@ -1,0 +1,82 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: xmessenger
+      POSTGRES_USER: xmessenger
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xmessenger -d xmessenger"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  minio:
+    image: minio/minio:${MINIO_IMAGE_TAG:?Set MINIO_IMAGE_TAG}
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - miniodata:/data
+  backend:
+    build: ./backend
+    environment:
+      HAMRAZ_DATA_DIR: /var/lib/hamraz
+      HAMRAZ_MEDIA_DIR: /var/lib/hamraz/uploads
+      DATABASE_URL: postgresql+psycopg://xmessenger:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/xmessenger
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
+      APP_ENV: ${APP_ENV:-development}
+      ALLOW_WS_TOKEN: "false"
+      COMMERCE_WEBHOOK_SECRET: ${COMMERCE_WEBHOOK_SECRET:?Set COMMERCE_WEBHOOK_SECRET}
+      INFRA_HEARTBEAT_SECRET: ${INFRA_HEARTBEAT_SECRET:?Set INFRA_HEARTBEAT_SECRET}
+      ADMIN_AUDIT_SECRET: ${ADMIN_AUDIT_SECRET:?Set ADMIN_AUDIT_SECRET}
+      REDIS_URL: redis://redis:6379/0
+      AI_PROVIDER: local
+      CORS_ORIGINS: http://localhost:5173
+      HAMRAZ_REGION: ${HAMRAZ_REGION:-local-1}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}
+      CDN_BASE_URL: ${CDN_BASE_URL:-}
+      CDN_SIGNING_SECRET: ${CDN_SIGNING_SECRET:?Set CDN_SIGNING_SECRET}
+      STUN_URL: ${STUN_URL:-stun:stun.l.google.com:19302}
+      TURN_URL: ${TURN_URL:-}
+      TURN_USERNAME: ${TURN_USERNAME:-}
+      TURN_PASSWORD: ${TURN_PASSWORD:-}
+      SYNC_MAX_BATCH: ${SYNC_MAX_BATCH:-500}
+      P2P_OFFER_MINUTES: ${P2P_OFFER_MINUTES:-10}
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    volumes:
+      - hamrazdata:/var/lib/hamraz
+volumes:
+  pgdata:
+  miniodata:
+  hamrazdata:
